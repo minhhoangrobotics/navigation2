@@ -21,6 +21,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "std_msgs/msg/bool.hpp"
 
 #include "tf2/time.h"
 #include "tf2_ros/buffer.h"
@@ -202,11 +203,18 @@ protected:
   // Input/output speed controls
   /// @beirf Input cmd_vel subscriber
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_in_sub_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr localization_ready_sub_;
   /// @brief Output cmd_vel publisher
   rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_out_pub_;
 
   /// @brief Whether main routine is active
   bool process_active_;
+  /// @brief Stop when an enabled source has no timely, transformable observations.
+  bool stop_on_missing_observations_{false};
+  bool stop_on_localization_lost_{false};
+  bool localization_ready_{false};
+  rclcpp::Time last_localization_ready_{0, 0, RCL_ROS_TIME};
+  double localization_ready_timeout_{1.5};
 
   /// @brief Previous robot action
   Action robot_action_prev_;

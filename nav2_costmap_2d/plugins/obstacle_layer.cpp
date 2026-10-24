@@ -139,6 +139,7 @@ void ObstacleLayer::onInitialize()
     declareParameter(source + "." + "observation_persistence", rclcpp::ParameterValue(0.0));
     declareParameter(source + "." + "expected_update_rate", rclcpp::ParameterValue(0.0));
     declareParameter(source + "." + "data_type", rclcpp::ParameterValue(std::string("LaserScan")));
+    declareParameter(source + "." + "scan_tf_filter_tolerance", rclcpp::ParameterValue(0.05));
     declareParameter(source + "." + "min_obstacle_height", rclcpp::ParameterValue(0.0));
     declareParameter(source + "." + "max_obstacle_height", rclcpp::ParameterValue(0.0));
     declareParameter(source + "." + "inf_is_valid", rclcpp::ParameterValue(false));
@@ -249,7 +250,11 @@ void ObstacleLayer::onInitialize()
       observation_subscribers_.push_back(sub);
 
       observation_notifiers_.push_back(filter);
-      observation_notifiers_.back()->setTolerance(rclcpp::Duration::from_seconds(0.05));
+      double scan_tf_filter_tolerance = 0.05;
+      node->get_parameter(
+        name_ + "." + source + ".scan_tf_filter_tolerance", scan_tf_filter_tolerance);
+      observation_notifiers_.back()->setTolerance(
+        rclcpp::Duration::from_seconds(std::max(0.0, scan_tf_filter_tolerance)));
 
     } else {
       auto sub = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2,

@@ -82,11 +82,13 @@ bool Source::sourceValid(
   // than current time by source_timeout_ interval
   const rclcpp::Duration dt = curr_time - source_time;
   if (dt > source_timeout_) {
-    RCLCPP_WARN(
-      logger_,
-      "[%s]: Latest source and current collision monitor node timestamps differ on %f seconds. "
-      "Ignoring the source.",
-      source_name_.c_str(), dt.seconds());
+    auto node = node_.lock();
+    if (node) {
+      RCLCPP_WARN_THROTTLE(
+        logger_, *node->get_clock(), 5000,
+        "[%s]: Source is %.2f seconds old; ignoring it",
+        source_name_.c_str(), dt.seconds());
+    }
     return false;
   }
 

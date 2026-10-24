@@ -66,6 +66,14 @@ CollisionMonitor::on_configure(const rclcpp_lifecycle::State & /*state*/)
     std::bind(&CollisionMonitor::cmdVelInCallback, this, std::placeholders::_1));
   cmd_vel_out_pub_ = this->create_publisher<geometry_msgs::msg::Twist>(
     cmd_vel_out_topic, 1);
+  if (stop_on_localization_lost_) {
+    localization_ready_sub_ = create_subscription<std_msgs::msg::Bool>(
+      "/localization/ready", rclcpp::QoS(1).transient_local().reliable(),
+      [this](std_msgs::msg::Bool::ConstSharedPtr msg) {
+        localization_ready_ = msg->data;
+        last_localization_ready_ = now();
+      });
+  }
 
   return nav2_util::CallbackReturn::SUCCESS;
 }
@@ -127,6 +135,7 @@ CollisionMonitor::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
   RCLCPP_INFO(get_logger(), "Cleaning up");
 
   cmd_vel_in_sub_.reset();
+  localization_ready_sub_.reset();
   cmd_vel_out_pub_.reset();
 
   polygons_.clear();
@@ -211,6 +220,19 @@ bool CollisionMonitor::getParameters(
     node, "source_timeout", rclcpp::ParameterValue(2.0));
   source_timeout =
     rclcpp::Duration::from_seconds(get_parameter("source_timeout").as_double());
+  nav2_util::declare_parameter_if_not_declared(
+    node, "stop_on_missing_observations", rclcpp::ParameterValue(false));
+  stop_on_missing_observations_ = get_parameter("stop_on_missing_observations").as_bool();
+  nav2_util::declare_parameter_if_not_declared(
+    node, "stop_on_localization_lost", rclcpp::ParameterValue(false));
+  stop_on_localization_lost_ = get_parameter("stop_on_localization_lost").as_bool();
+  nav2_util::declare_parameter_if_not_declared(
+    node, "localization_ready_timeout", rclcpp::ParameterValue(1.5));
+  localization_ready_timeout_ = get_parameter("localization_ready_timeout").as_double();
+  if (localization_ready_timeout_ <= 0.0) {
+    RCLCPP_ERROR(get_logger(), "localization_ready_timeout must be positive");
+    return false;
+  }
   nav2_util::declare_parameter_if_not_declared(
     node, "base_shift_correction", rclcpp::ParameterValue(true));
   const bool base_shift_correction =
@@ -352,12 +374,33 @@ void CollisionMonitor::process(const Velocity & cmd_vel_in)
 
   // Points array collected from different data sources in a robot base frame
   std::vector<Point> collision_points;
+  bool missing_observations = false;
 
   // Fill collision_points array from different data sources
   for (std::shared_ptr<Source> source : sources_) {
     if (source->getEnabled()) {
+      const size_t previous_size = collision_points.size();
       source->getData(curr_time, collision_points);
+      missing_observations |= collision_points.size() == previous_size;
     }
+  }
+
+  const bool localization_lost = stop_on_localization_lost_ &&
+    (!localization_ready_ || last_localization_ready_.nanoseconds() == 0 ||
+    (curr_time - last_localization_ready_).seconds() > localization_ready_timeout_);
+  if ((stop_on_missing_observations_ && (sources_.empty() || missing_observations)) ||
+    localization_lost)
+  {
+    // This G1 safety option prevents a stale scan or failed TF lookup from
+    // turning into an empty obstacle list and passing the input velocity on.
+    if (robot_action_prev_.action_type != STOP) {
+      RCLCPP_WARN(get_logger(), "Stopping: safety observations or localization are unavailable");
+    }
+    const Action stop_action{STOP, {0.0, 0.0, 0.0}};
+    publishVelocity(stop_action);
+    robot_action_prev_ = stop_action;
+    publishPolygons();
+    return;
   }
 
   // By default - there is no action

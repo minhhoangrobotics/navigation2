@@ -599,9 +599,17 @@ bool ControllerServer::isGoalReached()
 
   geometry_msgs::msg::PoseStamped transformed_end_pose;
   rclcpp::Duration tolerance(rclcpp::Duration::from_seconds(costmap_ros_->getTransformTolerance()));
-  nav_2d_utils::transformPose(
-    costmap_ros_->getTfBuffer(), costmap_ros_->getGlobalFrameID(),
-    end_pose_, transformed_end_pose, tolerance);
+  if (!nav_2d_utils::transformPose(
+      costmap_ros_->getTfBuffer(), costmap_ros_->getGlobalFrameID(),
+      end_pose_, transformed_end_pose, tolerance))
+  {
+    // A failed TF lookup leaves transformed_end_pose at its default origin.
+    // Comparing that pose with the robot can falsely complete a distant goal.
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 5000,
+      "Cannot check goal until its pose transforms into the local costmap frame");
+    return false;
+  }
 
   return goal_checkers_[current_goal_checker_]->isGoalReached(
     pose.pose, transformed_end_pose.pose,
@@ -612,6 +620,14 @@ bool ControllerServer::getRobotPose(geometry_msgs::msg::PoseStamped & pose)
 {
   geometry_msgs::msg::PoseStamped current_pose;
   if (!costmap_ros_->getRobotPose(current_pose)) {
+    return false;
+  }
+  const auto age = now() - rclcpp::Time(current_pose.header.stamp);
+  const double tolerance = costmap_ros_->getTransformTolerance();
+  if (age.seconds() > tolerance || age.seconds() < -tolerance) {
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 5000,
+      "Robot pose TF is %.2f seconds old; refusing to command motion", age.seconds());
     return false;
   }
   pose = current_pose;

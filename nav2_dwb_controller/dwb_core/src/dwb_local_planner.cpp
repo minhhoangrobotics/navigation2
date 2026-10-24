@@ -274,10 +274,16 @@ DWBLocalPlanner::prepareGlobalPlan(
   }
 
   goal_pose.header.frame_id = global_plan_.header.frame_id;
+  goal_pose.header.stamp = clock_->now();
   goal_pose.pose = global_plan_.poses.back();
-  nav_2d_utils::transformPose(
-    tf_, costmap_ros_->getGlobalFrameID(), goal_pose,
-    goal_pose, transform_tolerance_);
+  nav_2d_msgs::msg::Pose2DStamped transformed_goal;
+  if (!nav_2d_utils::transformPose(
+      tf_, costmap_ros_->getGlobalFrameID(), goal_pose,
+      transformed_goal, transform_tolerance_))
+  {
+    throw dwb_core::PlannerTFException("Unable to transform goal into the local costmap frame");
+  }
+  goal_pose = transformed_goal;
 }
 
 nav_2d_msgs::msg::Twist2DStamped
@@ -450,8 +456,10 @@ DWBLocalPlanner::transformGlobalPlan(
 
   // let's get the pose of the robot in the frame of the plan
   nav_2d_msgs::msg::Pose2DStamped robot_pose;
+  auto current_pose = pose;
+  current_pose.header.stamp = clock_->now();
   if (!nav_2d_utils::transformPose(
-      tf_, global_plan_.header.frame_id, pose,
+      tf_, global_plan_.header.frame_id, current_pose,
       robot_pose, transform_tolerance_))
   {
     throw dwb_core::
@@ -513,16 +521,22 @@ DWBLocalPlanner::transformGlobalPlan(
   nav_2d_msgs::msg::Path2D transformed_plan;
   transformed_plan.header.frame_id = costmap_ros_->getGlobalFrameID();
   transformed_plan.header.stamp = pose.header.stamp;
+  const auto plan_transform_time = clock_->now();
 
   // Helper function for the transform below. Converts a pose2D from global
   // frame to local
   auto transformGlobalPoseToLocal = [&](const auto & global_plan_pose) {
       nav_2d_msgs::msg::Pose2DStamped stamped_pose, transformed_pose;
       stamped_pose.header.frame_id = global_plan_.header.frame_id;
+      stamped_pose.header.stamp = plan_transform_time;
       stamped_pose.pose = global_plan_pose;
-      nav_2d_utils::transformPose(
-        tf_, transformed_plan.header.frame_id,
-        stamped_pose, transformed_pose, transform_tolerance_);
+      if (!nav_2d_utils::transformPose(
+          tf_, transformed_plan.header.frame_id,
+          stamped_pose, transformed_pose, transform_tolerance_))
+      {
+        throw dwb_core::PlannerTFException(
+                "Unable to transform global plan into the local costmap frame");
+      }
       return transformed_pose.pose;
     };
 
