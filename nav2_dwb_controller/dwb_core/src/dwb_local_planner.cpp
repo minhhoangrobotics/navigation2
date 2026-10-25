@@ -34,6 +34,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -401,13 +402,16 @@ DWBLocalPlanner::coreScoringAlgorithm(
 
   if (best.total < 0) {
     if (debug_trajectory_details_) {
-      RCLCPP_ERROR(rclcpp::get_logger("DWBLocalPlanner"), "%s", tracker.getMessage().c_str());
+      std::ostringstream rejected;
+      RCLCPP_ERROR_THROTTLE(
+        logger_, *clock_, 2000, "DWB rejected all trajectories: %s",
+        tracker.getMessage().c_str());
       for (auto const & x : tracker.getPercentages()) {
-        RCLCPP_ERROR(
-          rclcpp::get_logger(
-            "DWBLocalPlanner"), "%.2f: %10s/%s", x.second,
-          x.first.first.c_str(), x.first.second.c_str());
+        rejected << ' ' << 100.0 * x.second << "% " << x.first.first << ": "
+                 << x.first.second << ';';
       }
+      RCLCPP_ERROR_THROTTLE(logger_, *clock_, 2000, "DWB rejection causes:%s",
+                            rejected.str().c_str());
     }
     throw NoLegalTrajectoriesException(tracker);
   }
