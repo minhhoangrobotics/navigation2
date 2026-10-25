@@ -40,6 +40,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -50,6 +51,7 @@
 #include "nav2_costmap_2d/clear_costmap_service.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
 #include "nav2_costmap_2d/layer.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 #include "nav2_util/lifecycle_node.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "tf2/convert.h"
@@ -375,6 +377,17 @@ protected:
   std::string footprint_;
   float footprint_padding_{0};
   std::string global_frame_;       ///< The global frame for the costmap
+  // Optional direct fused pose for a rolling local map. Obstacle observations
+  // still use their scan-time TF; this only sets the robot/map center.
+  bool use_goal_pose_{false};
+  std::string goal_pose_topic_;
+  double goal_pose_timeout_{0.5};
+  std::mutex goal_pose_mutex_;
+  nav_msgs::msg::Odometry::SharedPtr latest_goal_pose_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr goal_pose_sub_;
+  rclcpp::CallbackGroup::SharedPtr goal_pose_callback_group_;
+  rclcpp::executors::SingleThreadedExecutor::SharedPtr goal_pose_executor_;
+  std::unique_ptr<nav2_util::NodeThread> goal_pose_executor_thread_;
   int map_height_meters_{0};
   double map_publish_frequency_{0};
   double map_update_frequency_{0};
