@@ -139,6 +139,7 @@ void ObstacleLayer::onInitialize()
     declareParameter(source + "." + "observation_persistence", rclcpp::ParameterValue(0.0));
     declareParameter(source + "." + "expected_update_rate", rclcpp::ParameterValue(0.0));
     declareParameter(source + "." + "data_type", rclcpp::ParameterValue(std::string("LaserScan")));
+    declareParameter(source + "." + "scan_tf_filter_enabled", rclcpp::ParameterValue(true));
     declareParameter(source + "." + "scan_tf_filter_tolerance", rclcpp::ParameterValue(0.05));
     declareParameter(source + "." + "min_obstacle_height", rclcpp::ParameterValue(0.0));
     declareParameter(source + "." + "max_obstacle_height", rclcpp::ParameterValue(0.0));
@@ -227,6 +228,25 @@ void ObstacleLayer::onInitialize()
       auto sub = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::LaserScan,
           rclcpp_lifecycle::LifecycleNode>>(node, topic, custom_qos_profile, sub_opt);
       sub->unsubscribe();
+
+      bool scan_tf_filter_enabled = true;
+      node->get_parameter(name_ + "." + source + ".scan_tf_filter_enabled", scan_tf_filter_enabled);
+      if (!scan_tf_filter_enabled) {
+        // Level scans publish exact-time TF before the scan. The observation
+        // buffer transforms at that stamp and reports any failure explicitly.
+        if (inf_is_valid) {
+          sub->registerCallback(std::bind(
+            &ObstacleLayer::laserScanValidInfCallback, this, std::placeholders::_1,
+            observation_buffers_.back()));
+        } else {
+          sub->registerCallback(std::bind(
+            &ObstacleLayer::laserScanCallback, this, std::placeholders::_1,
+            observation_buffers_.back()));
+        }
+        observation_subscribers_.push_back(sub);
+        RCLCPP_INFO(logger_, "Using timestamped direct scan callback for %s", topic.c_str());
+        continue;
+      }
 
       auto filter = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::LaserScan>>(
         *sub, *tf_, global_frame_, 50,
